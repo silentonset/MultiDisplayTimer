@@ -1,0 +1,27 @@
+{
+  "name": "multi-display-timer",
+  "version": "0.1.0",
+  "description": "Cross-platform multi-display timer with live controller preview",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win portable nsis",
+    "dist:mac": "electron-builder --mac dmg",
+    "dist:linux": "electron-builder --linux AppImage"
+  },
+  "devDependencies": {
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.example.multidisplaytimer",
+    "productName": "MultiDisplayTimer",
+    "files": [
+      "main.js",
+      "preload.js",
+      "controller.html",
+      "display.html",
+      "shared/**/*"
+    ]
+  }
+}

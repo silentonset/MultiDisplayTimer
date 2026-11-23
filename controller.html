@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Timer Controller</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+      --success: #22c55e;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 20px;
+    }
+    .layout {
+      max-width: 1040px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 20px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    h2 {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+
+    /* Live Preview Container */
+    .preview-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .status-pill {
+      font-size: 0.8rem;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #475569;
+    }
+    .status-pill.live { background: #166534; color: #bbf7d0; }
+    .status-pill.floating { background: #1e40af; color: #bfdbfe; }
+    .status-pill.offline { background: #7f1d1d; color: #fecaca; }
+    .status-pill.warn { background: #78350f; color: #fde68a; }
+
+    .preview-frame {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #000;
+    }
+    .preview-stage { width: 100%; height: 100%; }
+    .preview-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.72);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      text-align: center;
+      padding: 16px;
+      backdrop-filter: blur(2px);
+    }
+    .preview-overlay.hidden { display: none; }
+    .preview-overlay strong { color: #fecaca; font-size: 1rem; }
+
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    button, select, input[type="text"], input[type="number"] {
+      background: #334155;
+      color: var(--text);
+      border: 1px solid #475569;
+      border-radius: 8px;
+      padding: 9px 12px;
+      font-size: 0.9rem;
+    }
+    button { cursor: pointer; font-weight: 500; }
+    button:hover { background: #475569; }
+    button.primary { background: var(--accent); border-color: var(--accent); }
+    button.success { background: var(--success); border-color: var(--success); color: #052e16; font-weight: 700; }
+    button.danger { background: var(--danger); border-color: var(--danger); }
+
+    .unit-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    .unit-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    .unit-box label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; }
+    .unit-box input { width: 72px; text-align: center; font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+    .nudge { display: flex; gap: 6px; width: 100%; }
+    .nudge button { flex: 1; padding: 6px; font-size: 0.85rem; }
+
+    .field { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+    .field label { font-size: 0.8rem; color: var(--muted); }
+    .meta-line { font-size: 0.8rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <!-- LEFT: 1:1 PREVIEW + DISPLAY 1 TARGETING -->
+    <div style="display:flex; flex-direction:column; gap:20px;">
+      <div class="card">
+        <div class="preview-header">
+          <h2>Display 1 Live Preview</h2>
+          <span id="statusPill" class="status-pill offline">DISPLAY 1 NOT ACTIVE</span>
+        </div>
+
+        <div id="previewFrame" class="preview-frame">
+          <div id="previewStage" class="preview-stage"></div>
+          <div id="previewOverlay" class="preview-overlay">
+            <strong id="overlayTitle">Display 1 is NOT active on any screen</strong>
+            <span id="overlaySub" class="meta-line">The clock is not visible to your audience yet.</span>
+            <button id="quickLaunchBtn" class="primary">Launch Display 1</button>
+          </div>
+        </div>
+        <div id="telemetryLine" class="meta-line">Heartbeat: waiting for Display 1...</div>
+      </div>
+
+      <div class="card">
+        <h2>Display 1 Window &amp; Screen Target</h2>
+        <div class="row">
+          <button id="toggleDisplayBtn" class="primary">Open Display 1</button>
+          <select id="modeSelect">
+            <option value="fullscreen">Fullscreen on Target Screen</option>
+            <option value="floating">Floating Window</option>
+          </select>
+          <label class="row" style="font-size:0.85rem; color:var(--muted);">
+            <input id="alwaysOnTopChk" type="checkbox" /> Always on Top (Floating)
+          </label>
+        </div>
+
+        <div class="field">
+          <label for="screenSelect">Target Screen</label>
+          <select id="screenSelect"></select>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: CLOCK CONTROLS & DISPLAY 1 PARAMETERS -->
+    <div style="display:flex; flex-direction:column; gap:20px;">
+      <div class="card">
+        <h2>Clock Control</h2>
+        <div class="row">
+          <button id="startPauseBtn" class="success" style="flex:1;">Start</button>
+          <button id="resetBtn">Reset</button>
+          <button id="applyInputBtn" class="primary">Apply Input</button>
+        </div>
+
+        <div class="unit-grid">
+          <div class="unit-box">
+            <label>Hours</label>
+            <input id="inHours" type="number" min="0" max="99" value="0" />
+            <div class="nudge">
+              <button data-delta="-3600000">-1h</button>
+              <button data-delta="3600000">+1h</button>
+            </div>
+          </div>
+          <div class="unit-box">
+            <label>Minutes</label>
+            <input id="inMinutes" type="number" min="0" max="59" value="5" />
+            <div class="nudge">
+              <button data-delta="-60000">-1m</button>
+              <button data-delta="60000">+1m</button>
+            </div>
+          </div>
+          <div class="unit-box">
+            <label>Seconds</label>
+            <input id="inSeconds" type="number" min="0" max="59" value="0" />
+            <div class="nudge">
+              <button data-delta="-1000">-1s</button>
+              <button data-delta="1000">+1s</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Display 1 Appearance</h2>
+        <div class="field">
+          <label for="titleInput">Banner / Label Text</label>
+          <input id="titleInput" type="text" placeholder="e.g. SESSION 1 / BREAK" />
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="bgColorInput">Background</label>
+            <input id="bgColorInput" type="color" value="#000000" style="width:100%; height:38px;" />
+          </div>
+          <div class="field">
+            <label for="textColorInput">Text Color</label>
+            <input id="textColorInput" type="color" value="#ffffff" style="width:100%; height:38px;" />
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./shared/display-renderer.js"></script>
+  <script>
+    const previewFrame = document.getElementById('previewFrame');
+    const previewStage = document.getElementById('previewStage');
+    const previewOverlay = document.getElementById('previewOverlay');
+    const overlayTitle = document.getElementById('overlayTitle');
+    const overlaySub = document.getElementById('overlaySub');
+    const statusPill = document.getElementById('statusPill');
+    const telemetryLine = document.getElementById('telemetryLine');
+
+    const toggleDisplayBtn = document.getElementById('toggleDisplayBtn');
+    const quickLaunchBtn = document.getElementById('quickLaunchBtn');
+    const modeSelect = document.getElementById('modeSelect');
+    const screenSelect = document.getElementById('screenSelect');
+    const alwaysOnTopChk = document.getElementById('alwaysOnTopChk');
+
+    const startPauseBtn = document.getElementById('startPauseBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const applyInputBtn = document.getElementById('applyInputBtn');
+    const inHours = document.getElementById('inHours');
+    const inMinutes = document.getElementById('inMinutes');
+    const inSeconds = document.getElementById('inSeconds');
+
+    const titleInput = document.getElementById('titleInput');
+    const bgColorInput = document.getElementById('bgColorInput');
+    const textColorInput = document.getElementById('textColorInput');
+
+    let defaultDurationMs = 5 * 60 * 1000;
+    let clock = {
+      isRunning: false,
+      remainingMs: defaultDurationMs,
+      targetEndTime: 0,
+      hasStarted: false
+    };
+    let theme = {
+      bgColor: '#000000',
+      textColor: '#ffffff',
+      titleText: ''
+    };
+
+    let display1Status = { open: false };
+    let lastHeartbeat = null;
+    let screens = [];
+
+    function pushTimerState() {
+      window.timerAPI.sendTimerState({ clock, theme });
+    }
+
+    window.timerAPI.onStateRequested(() => pushTimerState());
+
+    function getRemainingMs() {
+      return clock.isRunning ? Math.max(0, clock.targetEndTime - Date.now()) : clock.remainingMs;
+    }
+
+    function syncInputs(ms) {
+      const total = Math.ceil(Math.max(0, ms) / 1000);
+      inHours.value = Math.floor(total / 3600);
+      inMinutes.value = Math.floor((total % 3600) / 60);
+      inSeconds.value = total % 60;
+    }
+
+    startPauseBtn.addEventListener('click', () => {
+      if (clock.isRunning) {
+        clock.remainingMs = getRemainingMs();
+        clock.isRunning = false;
+      } else {
+        if (clock.remainingMs <= 0) return;
+        clock.targetEndTime = Date.now() + clock.remainingMs;
+        clock.isRunning = true;
+        clock.hasStarted = true;
+      }
+      pushTimerState();
+    });
+
+    resetBtn.addEventListener('click', () => {
+      clock.isRunning = false;
+      clock.remainingMs = defaultDurationMs;
+      clock.hasStarted = false;
+      syncInputs(defaultDurationMs);
+      pushTimerState();
+    });
+
+    applyInputBtn.addEventListener('click', () => {
+      const h = Math.max(0, parseInt(inHours.value, 10) || 0);
+      const m = Math.max(0, parseInt(inMinutes.value, 10) || 0);
+      const s = Math.max(0, parseInt(inSeconds.value, 10) || 0);
+      defaultDurationMs = ((h * 3600) + (m * 60) + s) * 1000;
+      clock.isRunning = false;
+      clock.remainingMs = defaultDurationMs;
+      clock.hasStarted = false;
+      pushTimerState();
+    });
+
+    document.querySelectorAll('[data-delta]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const delta = parseInt(btn.dataset.delta, 10);
+        if (clock.isRunning) {
+          const now = Date.now();
+          clock.targetEndTime = Math.max(now, clock.targetEndTime + delta);
+          if (clock.targetEndTime === now) {
+            clock.isRunning = false;
+            clock.remainingMs = 0;
+          }
+        } else {
+          clock.remainingMs = Math.max(0, clock.remainingMs + delta);
+          if (clock.remainingMs > 0) clock.hasStarted = false;
+          syncInputs(clock.remainingMs);
+        }
+        pushTimerState();
+      });
+    });
+
+    [titleInput, bgColorInput, textColorInput].forEach((el) => {
+      el.addEventListener('input', () => {
+        theme.titleText = titleInput.value;
+        theme.bgColor = bgColorInput.value;
+        theme.textColor = textColorInput.value;
+        pushTimerState();
+      });
+    });
+
+    /* -------- Display 1 Window & Screen Targeting -------- */
+    function renderScreenDropdown() {
+      const selected = Number(screenSelect.value) || display1Status.targetScreenId;
+      screenSelect.innerHTML = '';
+      screens.forEach((s) => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = `${s.label}${s.isPrimary ? ' (Primary)' : ''} — ${s.bounds.width}×${s.bounds.height}`;
+        if (s.id === selected) opt.selected = true;
+        screenSelect.appendChild(opt);
+      });
+      updatePreviewAspectRatio();
+    }
+
+    function updatePreviewAspectRatio() {
+      const target = screens.find((s) => s.id === Number(screenSelect.value));
+      if (target) {
+        previewFrame.style.aspectRatio = `${target.bounds.width} / ${target.bounds.height}`;
+      }
+    }
+
+    function sendDisplayConfig(openOverride) {
+      const open = openOverride !== undefined ? openOverride : display1Status.open;
+      window.timerAPI.setDisplay1Config({
+        open,
+        mode: modeSelect.value,
+        targetScreenId: Number(screenSelect.value),
+        alwaysOnTop: alwaysOnTopChk.checked
+      });
+    }
+
+    toggleDisplayBtn.addEventListener('click', () => sendDisplayConfig(!display1Status.open));
+    quickLaunchBtn.addEventListener('click', () => sendDisplayConfig(true));
+    modeSelect.addEventListener('change', () => sendDisplayConfig());
+    alwaysOnTopChk.addEventListener('change', () => sendDisplayConfig());
+    screenSelect.addEventListener('change', () => {
+      updatePreviewAspectRatio();
+      sendDisplayConfig();
+    });
+
+    function updateStatusUI() {
+      const open = display1Status.open;
+      toggleDisplayBtn.textContent = open ? 'Close Display 1' : 'Open Display 1';
+      toggleDisplayBtn.className = open ? 'danger' : 'primary';
+
+      if (!open) {
+        statusPill.className = 'status-pill offline';
+        statusPill.textContent = 'DISPLAY 1 NOT ACTIVE';
+        overlayTitle.textContent = 'Display 1 is NOT active on any screen';
+        overlaySub.textContent = 'Click below to launch Display 1.';
+        previewOverlay.classList.remove('hidden');
+        telemetryLine.textContent = 'Heartbeat: Display 1 closed.';
+        return;
+      }
+
+      if (display1Status.minimized || !display1Status.visible) {
+        statusPill.className = 'status-pill warn';
+        statusPill.textContent = 'DISPLAY 1 HIDDEN / MINIMIZED';
+        overlayTitle.textContent = 'Display 1 is minimized or hidden!';
+        overlaySub.textContent = 'Click Launch Display 1 to bring it back on screen.';
+        previewOverlay.classList.remove('hidden');
+        return;
+      }
+
+      previewOverlay.classList.add('hidden');
+      if (display1Status.isFullscreen) {
+        statusPill.className = 'status-pill live';
+        statusPill.textContent = `LIVE FULLSCREEN · ${display1Status.targetScreenLabel}`;
+      } else {
+        statusPill.className = 'status-pill floating';
+        statusPill.textContent = 'ACTIVE · FLOATING WINDOW';
+      }
+    }
+
+    window.timerAPI.onScreensChanged((nextScreens) => {
+      screens = nextScreens;
+      renderScreenDropdown();
+    });
+
+    window.timerAPI.onDisplay1Status((status) => {
+      display1Status = status;
+      modeSelect.value = status.mode;
+      updateStatusUI();
+    });
+
+    window.timerAPI.onDisplay1Heartbeat((hb) => {
+      lastHeartbeat = hb;
+    });
+
+    (async () => {
+      screens = await window.timerAPI.getScreens();
+      const cfg = await window.timerAPI.getDisplay1Status();
+      modeSelect.value = cfg.mode;
+      alwaysOnTopChk.checked = Boolean(cfg.alwaysOnTop);
+      renderScreenDropdown();
+      if (cfg.targetScreenId) {
+        screenSelect.value = cfg.targetScreenId;
+        updatePreviewAspectRatio();
+      }
+      updateStatusUI();
+    })();
+
+    function tick() {
+      const rem = getRemainingMs();
+      if (clock.isRunning && rem === 0) {
+        clock.isRunning = false;
+        clock.remainingMs = 0;
+        pushTimerState();
+      }
+
+      window.DisplayRenderer.render(previewStage, clock, theme);
+
+      startPauseBtn.textContent = clock.isRunning ? 'Pause' : 'Start';
+      startPauseBtn.className = clock.isRunning ? 'danger' : 'success';
+
+      if (display1Status.open && !display1Status.minimized && display1Status.visible) {
+        const ageMs = lastHeartbeat ? Date.now() - lastHeartbeat.renderedAt : Infinity;
+        if (ageMs < 2000) {
+          telemetryLine.textContent =
+            `Verified live on Display 1 (${lastHeartbeat.width}×${lastHeartbeat.height}) · Rendered ${lastHeartbeat.formatted}`;
+        } else {
+          telemetryLine.textContent = 'Warning: Waiting for Display 1 render heartbeat...';
+        }
+      }
+
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>

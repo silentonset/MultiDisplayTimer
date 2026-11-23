@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Display 1</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #stage { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  </style>
+</head>
+<body>
+  <div id="stage"></div>
+  <script src="./shared/display-renderer.js"></script>
+  <script>
+    const stage = document.getElementById('stage');
+    let payload = {
+      clock: { isRunning: false, remainingMs: 0, targetEndTime: 0, hasStarted: false },
+      theme: { bgColor: '#000000', textColor: '#ffffff', titleText: '' }
+    };
+
+    window.timerAPI.onTimerState((nextPayload) => {
+      payload = nextPayload;
+    });
+
+    window.timerAPI.requestInitialState();
+
+    let lastHeartbeat = 0;
+    function frame() {
+      const rendered = window.DisplayRenderer.render(stage, payload.clock, payload.theme);
+
+      const now = Date.now();
+      if (now - lastHeartbeat >= 500) {
+        lastHeartbeat = now;
+        window.timerAPI.sendDisplay1Heartbeat({
+          renderedAt: now,
+          formatted: rendered.formatted,
+          width: window.innerWidth,
+          height: window.innerHeight
+        });
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>
