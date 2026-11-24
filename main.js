@@ -1,5 +1,58 @@
-const { app, BrowserWindow, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, dialog } = require('electron');
+const fs = require('fs');
 const path = require('path');
+const { pathToFileURL } = require('url');
+const { execFile } = require('child_process');
+
+let cachedSystemFonts = null;
+
+function listSystemFonts() {
+  if (cachedSystemFonts) {
+    return Promise.resolve(cachedSystemFonts);
+  }
+  return new Promise((resolve) => {
+    const finish = (rawOutput) => {
+      const names = [...new Set(
+        String(rawOutput || '')
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((name) => name && !name.startsWith('@'))
+      )].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+      if (names.length > 0) {
+        cachedSystemFonts = names;
+      }
+      resolve(names);
+    };
+
+    if (process.platform === 'win32') {
+      execFile(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Drawing; (New-Object System.Drawing.Text.InstalledFontCollection).Families.Name'
+        ],
+        { timeout: 8000, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
+        (err, stdout) => finish(err ? '' : stdout)
+      );
+    } else if (process.platform === 'darwin') {
+      execFile(
+        'sh',
+        ['-c', "fc-list : family 2>/dev/null || system_profiler SPFontsDataType 2>/dev/null | awk -F': ' '/Family:/{print $2}'"],
+        { timeout: 8000, maxBuffer: 4 * 1024 * 1024 },
+        (err, stdout) => finish(err ? '' : stdout.replace(/,/g, '\n'))
+      );
+    } else {
+      execFile(
+        'fc-list',
+        [':', 'family'],
+        { timeout: 8000, maxBuffer: 4 * 1024 * 1024 },
+        (err, stdout) => finish(err ? '' : stdout.replace(/,/g, '\n'))
+      );
+    }
+  });
+}
 
 let controllerWin = null;
 let display1Win = null;
@@ -17,6 +70,7 @@ function getSerializedScreens() {
     id: d.id,
     label: d.label || `Display ${index + 1}`,
     isPrimary: d.id === primaryId,
+    displayFrequency: Math.round(Number(d.displayFrequency) || 60),
     bounds: d.bounds,
     workArea: d.workArea
   }));
@@ -68,8 +122,10 @@ function emitDisplay1Status() {
 function createControllerWindow() {
   const primary = screen.getPrimaryDisplay().workArea;
   controllerWin = new BrowserWindow({
-    width: Math.min(1100, primary.width - 40),
-    height: Math.min(780, primary.height - 40),
+    width: Math.min(1360, primary.width - 40),
+    height: Math.min(860, primary.height - 40),
+    minWidth: 960,
+    minHeight: 620,
     title: 'Timer Controller',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -110,6 +166,25 @@ function createDisplay1Window(targetScreen) {
     }
   });
 
+  // Remove default menu on Display 1 so Ctrl+Q never quits the whole application
+  display1Win.setMenu(null);
+
+  // Intercept Ctrl+Q (or Cmd+Q) directly at the input level to reliably close ONLY Display 1
+  display1Win.webContents.on('before-input-event', (event, input) => {
+    if (
+      input.type === 'keyDown' &&
+      (input.control || input.meta) &&
+      !input.alt &&
+      typeof input.key === 'string' &&
+      input.key.toLowerCase() === 'q'
+    ) {
+      event.preventDefault();
+      if (display1Win && !display1Win.isDestroyed()) {
+        display1Win.close();
+      }
+    }
+  });
+
   display1Win.loadFile('display.html');
 
   display1Win.once('ready-to-show', () => {
@@ -117,7 +192,16 @@ function createDisplay1Window(targetScreen) {
       display1Win.setFullScreen(true);
     }
     display1Win.show();
+    display1Win.focus();
+    display1Win.webContents.send('display1-flash-notice');
     emitDisplay1Status();
+  });
+
+  display1Win.on('enter-full-screen', () => {
+    if (display1Win && !display1Win.isDestroyed()) {
+      display1Win.focus();
+      display1Win.webContents.send('display1-flash-notice');
+    }
   });
 
   const statusEvents = [
@@ -180,6 +264,7 @@ async function applyDisplay1Config(nextConfig) {
     await new Promise((r) => setTimeout(r, 60));
     display1Win.setFullScreen(true);
     display1Win.show();
+    display1Win.focus();
   } else {
     if (display1Win.isFullScreen()) {
       display1Win.setFullScreen(false);
@@ -195,6 +280,7 @@ async function applyDisplay1Config(nextConfig) {
       height: h
     });
     display1Win.show();
+    display1Win.focus();
   }
 
   emitDisplay1Status();
@@ -212,9 +298,54 @@ app.whenReady().then(() => {
   screen.on('display-metrics-changed', () => { emitScreens(); emitDisplay1Status(); });
 
   ipcMain.handle('get-screens', () => getSerializedScreens());
+  ipcMain.handle('get-system-fonts', () => listSystemFonts());
   ipcMain.handle('get-display1-status', () => {
     emitDisplay1Status();
     return display1Config;
+  });
+
+  ipcMain.handle('pick-background-media', async (_e, mediaType) => {
+    const filters = mediaType === 'video'
+      ? [{ name: 'Video Files (max 10s)', extensions: ['mp4', 'webm', 'mov', 'm4v', 'ogv'] }]
+      : [{ name: 'Image Files', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'] }];
+
+    const result = await dialog.showOpenDialog(controllerWin, {
+      title: mediaType === 'video' ? 'Select Background Video (Max 10 Seconds)' : 'Select Background Image',
+      properties: ['openFile'],
+      filters
+    });
+
+    if (result.canceled || !result.filePaths || !result.filePaths.length) {
+      return { canceled: true };
+    }
+
+    const filePath = result.filePaths[0];
+    return {
+      canceled: false,
+      filePath,
+      fileName: path.basename(filePath),
+      fileUrl: pathToFileURL(filePath).href
+    };
+  });
+
+  ipcMain.handle('export-laps-txt', async (_e, { defaultFileName, content }) => {
+    const safeName = String(defaultFileName || 'stopwatch-laps.txt').replace(/[<>:"/\\|?*]+/g, '_');
+    const result = await dialog.showSaveDialog(controllerWin, {
+      title: 'Export Stopwatch Laps',
+      defaultPath: safeName,
+      filters: [{ name: 'Text Files', extensions: ['txt'] }]
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { canceled: true };
+    }
+
+    fs.writeFileSync(result.filePath, String(content || ''), 'utf8');
+    return {
+      canceled: false,
+      filePath: result.filePath,
+      fileName: path.basename(result.filePath)
+    };
   });
 
   ipcMain.on('set-display1-config', (_e, cfg) => {
@@ -236,6 +367,12 @@ app.whenReady().then(() => {
   ipcMain.on('display1-heartbeat', (_e, heartbeat) => {
     if (controllerWin && !controllerWin.isDestroyed()) {
       controllerWin.webContents.send('display1-heartbeat', heartbeat);
+    }
+  });
+
+  ipcMain.on('close-display1', () => {
+    if (display1Win && !display1Win.isDestroyed()) {
+      display1Win.close();
     }
   });
 });

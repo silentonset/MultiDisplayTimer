@@ -5,19 +5,171 @@
   <title>Display 1</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body, #stage { width: 100%; height: 100%; overflow: hidden; background: #000; }
+    html, body, #stage {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+
+    #exitNotice {
+      position: fixed;
+      top: 28px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 26px;
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.92);
+      border: 2px solid #f59e0b;
+      color: #f8fafc;
+      font-size: clamp(14px, 1.8vw, 24px);
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 24px rgba(245, 158, 11, 0.35);
+      pointer-events: none;
+      user-select: none;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.3s ease;
+    }
+
+    #exitNotice.visible {
+      opacity: 1;
+      visibility: visible;
+      animation: noticeFlash 0.85s ease-in-out infinite;
+    }
+
+    #exitNotice kbd {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 6px;
+      background: #f59e0b;
+      color: #0f172a;
+      font-family: inherit;
+      font-weight: 800;
+      font-size: 0.95em;
+    }
+
+    #exitNotice .notice-countdown {
+      font-size: 0.78em;
+      color: #fde68a;
+      font-variant-numeric: tabular-nums;
+      opacity: 0.9;
+    }
+
+    @keyframes noticeFlash {
+      0%, 100% {
+        opacity: 1;
+        border-color: #f59e0b;
+        box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 28px rgba(245, 158, 11, 0.55);
+      }
+      50% {
+        opacity: 0.38;
+        border-color: #fef08a;
+        box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 8px rgba(245, 158, 11, 0.15);
+      }
+    }
   </style>
 </head>
 <body>
   <div id="stage"></div>
+
+  <div id="exitNotice" role="status" aria-live="polite">
+    <span>Press <kbd>Ctrl</kbd> + <kbd>Q</kbd> to close this display window</span>
+    <span id="noticeCountdown" class="notice-countdown">(5s)</span>
+  </div>
+
   <script src="./shared/display-renderer.js"></script>
   <script>
     const stage = document.getElementById('stage');
+    const exitNotice = document.getElementById('exitNotice');
+    const noticeCountdown = document.getElementById('noticeCountdown');
+
     let payload = {
-      clock: { isRunning: false, remainingMs: 0, targetEndTime: 0, hasStarted: false },
-      theme: { bgColor: '#000000', textColor: '#ffffff', titleText: '' }
+      clock: {
+        id: '001',
+        label: 'Timer 1',
+        showLabel: false,
+        mode: 'countdown',
+        speed: 1,
+        isRunning: false,
+        remainingMs: 0,
+        anchorTime: 0,
+        anchorRemainingMs: 0,
+        targetEndTime: 0,
+        hasStarted: false,
+        elapsedMs: 0,
+        startedAt: 0,
+        showMilliseconds: true,
+        intervalEnabled: false,
+        intervalMs: 0,
+        showIntervalOnDisplay: true,
+        timeZone: 'local',
+        timeZoneLabel: 'Local Time',
+        use12Hour: false,
+        showZoneOnDisplay: true
+      },
+      appearance: { ...window.DisplayRenderer.DEFAULT_APPEARANCE },
+      behavior: { ...window.DisplayRenderer.DEFAULT_BEHAVIOR },
+      message: { ...window.DisplayRenderer.DEFAULT_MESSAGE },
+      dualClockMode: false,
+      overallClock: null
     };
 
+    /* -------- 5-Second Flashing Exit Notice -------- */
+    const NOTICE_DURATION_MS = 5000;
+    let noticeHideTimeout = null;
+    let noticeTickInterval = null;
+
+    function triggerExitNotice() {
+      if (noticeHideTimeout) clearTimeout(noticeHideTimeout);
+      if (noticeTickInterval) clearInterval(noticeTickInterval);
+
+      const expiresAt = Date.now() + NOTICE_DURATION_MS;
+      noticeCountdown.textContent = '(5s)';
+      exitNotice.classList.remove('visible');
+      // Force reflow so animation restarts cleanly
+      void exitNotice.offsetWidth;
+      exitNotice.classList.add('visible');
+
+      noticeTickInterval = setInterval(() => {
+        const secs = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+        noticeCountdown.textContent = `(${secs}s)`;
+        if (secs <= 0) {
+          clearInterval(noticeTickInterval);
+          noticeTickInterval = null;
+        }
+      }, 200);
+
+      noticeHideTimeout = setTimeout(() => {
+        exitNotice.classList.remove('visible');
+        if (noticeTickInterval) {
+          clearInterval(noticeTickInterval);
+          noticeTickInterval = null;
+        }
+        noticeHideTimeout = null;
+      }, NOTICE_DURATION_MS);
+    }
+
+    // Show immediately on window open and also when triggered from main process (e.g. entering fullscreen)
+    triggerExitNotice();
+    window.timerAPI.onDisplay1FlashNotice(() => triggerExitNotice());
+
+    /* -------- Ctrl+Q Shortcut Fallback in Renderer -------- */
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'q') {
+        e.preventDefault();
+        e.stopPropagation();
+        window.timerAPI.closeDisplay1();
+      }
+    }, true);
+
+    /* -------- Timer State & Render Loop -------- */
     window.timerAPI.onTimerState((nextPayload) => {
       payload = nextPayload;
     });
@@ -26,7 +178,18 @@
 
     let lastHeartbeat = 0;
     function frame() {
-      const rendered = window.DisplayRenderer.render(stage, payload.clock, payload.theme);
+      const rendered = window.DisplayRenderer.render(
+        stage,
+        payload.clock,
+        payload.appearance || payload.theme,
+        payload.behavior,
+        {
+          referenceWidth: window.innerWidth,
+          message: payload.message,
+          dualClockMode: Boolean(payload.dualClockMode),
+          overallClock: payload.overallClock || null
+        }
+      );
 
       const now = Date.now();
       if (now - lastHeartbeat >= 500) {

@@ -14,5 +14,12 @@ contextBridge.exposeInMainWorld('timerAPI', {
   onStateRequested: (cb) => ipcRenderer.on('state-requested', () => cb()),
 
   sendDisplay1Heartbeat: (hb) => ipcRenderer.send('display1-heartbeat', hb),
-  onDisplay1Heartbeat: (cb) => ipcRenderer.on('display1-heartbeat', (_e, hb) => cb(hb))
+  onDisplay1Heartbeat: (cb) => ipcRenderer.on('display1-heartbeat', (_e, hb) => cb(hb)),
+
+  closeDisplay1: () => ipcRenderer.send('close-display1'),
+  onDisplay1FlashNotice: (cb) => ipcRenderer.on('display1-flash-notice', () => cb()),
+
+  pickBackgroundMedia: (mediaType) => ipcRenderer.invoke('pick-background-media', mediaType),
+  getSystemFonts: () => ipcRenderer.invoke('get-system-fonts'),
+  exportLapsTxt: (payload) => ipcRenderer.invoke('export-laps-txt', payload)
 });
